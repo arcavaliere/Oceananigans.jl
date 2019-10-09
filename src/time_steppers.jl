@@ -52,7 +52,7 @@ function adams_bashforth_time_step!(model, arch, grid, buoyancy, coriolis, closu
     boundary_condition_args = (model.clock.time, model.clock.iteration, U, C, model.parameters)
 
     # Pre-computations:
-    @launch device(arch) config=launch_config(grid, 3) store_previous_source_terms!(grid, Gⁿ, G⁻)
+    @launch device(arch) config=launch_config(grid, 3) store_previous_source_terms!(G⁻, grid, Gⁿ)
     fill_halo_regions!(merge(U, C), bcs.solution, arch, grid, boundary_condition_args...)
 
     @launch device(arch) config=launch_config(grid, 3) calc_diffusivities!(K, grid, closure, buoyancy, U, C)
@@ -66,7 +66,7 @@ function adams_bashforth_time_step!(model, arch, grid, buoyancy, coriolis, closu
     calculate_boundary_source_terms!(Gⁿ, arch, grid, bcs.solution, boundary_condition_args...)
 
     # Complete explicit substep:
-    @launch device(arch) config=launch_config(grid, 3) adams_bashforth_update_source_terms!(grid, χ, Gⁿ, G⁻)
+    @launch device(arch) config=launch_config(grid, 3) adams_bashforth_update_source_terms!(Gⁿ, G⁻, grid, χ)
 
     # Start pressure correction substep with a pressure solve:
     fill_halo_regions!(Gⁿ[1:3], bcs.tendency[1:3], arch, grid)
@@ -91,34 +91,34 @@ end
 
 function solve_for_pressure!(::CPU, model::Model)
     ϕ = model.poisson_solver.storage
-
     solve_poisson_3d!(model.poisson_solver, model.grid)
     data(model.pressures.pNHS) .= real.(ϕ)
 end
 
 function solve_for_pressure!(::GPU, model::Model)
     ϕ = model.poisson_solver.storage
-
     solve_poisson_3d!(model.poisson_solver, model.grid)
     @launch device(GPU()) config=launch_config(model.grid, 3) idct_permute!(model.grid, model.poisson_solver.bcs, ϕ,
                                                                             model.pressures.pNHS.data)
 end
 
 """ Store previous source terms before updating them. """
-function store_previous_source_terms!(grid::AbstractGrid, 
-                                      Gⁿ::NamedTuple{S, NTuple{N, T}}, 
-                                      G⁻::NamedTuple{S, NTuple{N, T}}) where {N, S, T}
-
+function store_previous_source_terms!(G⁻, grid, Gⁿ)
     @loop for k in (1:grid.Nz; (blockIdx().z - 1) * blockDim().z + threadIdx().z)
         @loop for j in (1:grid.Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
             @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
-                ntuple(N) do α
-                    Base.@_inline_meta
-                    @inbounds G⁻[α][i, j, k] = Gⁿ[α][i, j, k]
-                end
+                _store_previous_source_terms!(G⁻, Gⁿ, i, j, k) 
             end
         end
     end
+end
+
+@inline function _store_previous_source_terms!(G⁻::NamedTuple{S, NTuple{N, T}},
+                                               Gⁿ::NamedTuple{S, NTuple{N, T}}, i, j, k) where {N, S, T} 
+    ntuple(Val(N)) do α
+        @inbounds G⁻[α][i, j, k] = Gⁿ[α][i, j, k]
+    end
+    return nothing
 end
 
 """
@@ -211,8 +211,8 @@ function calculate_interior_source_terms!(G, arch, grid, coriolis, closure, U, C
                                                                             parameters, time)
 
     for (tracer_index, c) in enumerate(values(C))
-        Fc = F[tracer_index]
-        Gc = G[tracer_index]
+        Fc = F[tracer_index+3]
+        Gc = G[tracer_index+3]
         @launch device(arch) threads=(Tx, Ty) blocks=(Bx, By, Bz) calculate_Gc!(Gc, grid, closure, c, tracer_index, 
                                                                                 U, C, K, Fc, parameters, time)
                                                                                 
@@ -225,19 +225,24 @@ Adams-Bashforth method
 
     `G^{n+½} = (3/2 + χ)G^{n} - (1/2 + χ)G^{n-1}`
 """
-function adams_bashforth_update_source_terms!(grid::AbstractGrid{FT}, χ,
-                                              Gⁿ::NamedTuple{S, NTuple{N, T}}, 
-                                              G⁻::NamedTuple{S, NTuple{N, T}}) where {N, S, T, FT}
+function adams_bashforth_update_source_terms!(Gⁿ, G⁻, grid, χ)
     @loop for k in (1:grid.Nz; (blockIdx().z - 1) * blockDim().z + threadIdx().z)
         @loop for j in (1:grid.Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
             @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
-                ntuple(N) do α
-                    Base.@_inline_meta
-                    @inbounds Gⁿ[α][i, j, k] = (FT(1.5) + χ) * Gⁿ[α][i, j, k] - (FT(0.5) + χ) * G⁻[α][i, j, k]
-                end
+                _adams_bashforth_update_source_terms!(Gⁿ, G⁻, χ, i, j, k)
             end
         end
     end
+    return nothing
+end
+
+@inline function _adams_bashforth_update_source_terms!(Gⁿ::NamedTuple{S, NTuple{N, T}},
+                                                       G⁻::NamedTuple{S, NTuple{N, T}}, χ::FT, 
+                                                       i, j, k) where {N, S, T, FT}
+    ntuple(Val(N)) do α
+        @inbounds Gⁿ[α][i, j, k] = (FT(1.5) + χ) * Gⁿ[α][i, j, k] - (FT(0.5) + χ) * G⁻[α][i, j, k]
+    end
+    return nothing
 end
 
 """
@@ -391,14 +396,18 @@ function update_velocities_and_tracers!(grid::AbstractGrid, U,
                 @inbounds U.u[i, j, k] += (Gⁿ.u[i, j, k] - ∂x_p(i, j, k, grid, pNHS)) * Δt
                 @inbounds U.v[i, j, k] += (Gⁿ.v[i, j, k] - ∂y_p(i, j, k, grid, pNHS)) * Δt
 
-                ntuple(NC) do α
-                    Base.@_inline_meta
-                    c, Gcⁿ = C[α], Gⁿ[α+3]
-                    @inbounds c[i, j, k] += Gcⁿ[i, j, k] * Δt
-                end
+                update_tracers!(C, Gⁿ, Δt, i, j, k)
             end
         end
     end
+end
+
+@inline function update_tracers!(C::NamedTuple{S, NTuple{N, T}}, Gⁿ, Δt, i, j, k) where {N, S, T}
+    ntuple(Val(N)) do α
+        c, Gcⁿ = C[α], Gⁿ[α+3]
+        @inbounds c[i, j, k] += Gcⁿ[i, j, k] * Δt
+    end
+    return nothing
 end
 
 """
