@@ -113,21 +113,24 @@ Return the diffusive flux divergence `∇ ⋅ (κ ∇ c)` for the turbulence
            )
 end
 
-function calc_diffusivities!(K, grid, closure::AbstractAnisotropicMinimumDissipation, buoyancy, U, 
-                             C::NamedTuple{S, NTuple{N, T}}) where {N, S, T}
+function calc_diffusivities!(K, grid, closure::AbstractAnisotropicMinimumDissipation, buoyancy, U, C)
     @loop for k in (1:grid.Nz; (blockIdx().z - 1) * blockDim().z + threadIdx().z)
         @loop for j in (1:grid.Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
             @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
                 @inbounds K.νₑ[i, j, k] = ν_ccc(i, j, k, grid, closure, buoyancy, U, C)
 
-                ntuple(N) do α
-                    Base.@_inline_meta
-                    κₑ = K.κₑ[α]
-                    c = C[α]
-                    @inbounds κₑ[i, j, k] = κ_ccc(i, j, k, grid, closure, c, α, buoyancy, U, C)
-                end
+                _calc_diffusivities!(K, grid, closure, buoyancy, U, C, i, j, k)
             end
         end
+    end
+    return nothing
+end
+
+@inline function _calc_diffusivities!(K, grid, closure, buoyancy, U, C::NamedTuple{S, NTuple{N, T}}, i, j, k) where {N, S, T}
+    ntuple(Val(N)) do α
+        κₑ = K.κₑ[α]
+        c = C[α]
+        @inbounds κₑ[i, j, k] = κ_ccc(i, j, k, grid, closure, c, α, buoyancy, U, C)
     end
     return nothing
 end
