@@ -56,9 +56,9 @@ calc_diffusivities!(diffusivities, grid, closure::ConstantAnisotropicDiffusivity
     + closure.νv * ∂z²_aaf(i, j, k, grid, w)
     )
 
-@inline function ∇_κ_∇c(i, j, k, grid, c, tracer, closure::ConstantAnisotropicDiffusivity, args...)
-    κh = getproperty(closure.κh, tracer)
-    κv = getproperty(closure.κv, tracer)
+@inline function ∇_κ_∇c(i, j, k, grid, c, tracer_index, closure::ConstantAnisotropicDiffusivity, args...)
+    κh = closure.κh[tracer_index]
+    κv = closure.κv[tracer_index]
 
     return (  κh * ∂x²_caa(i, j, k, grid, c)
             + κh * ∂y²_aca(i, j, k, grid, c)
