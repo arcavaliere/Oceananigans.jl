@@ -249,15 +249,15 @@ end
 TurbulentDiffusivities(arch::AbstractArchitecture, grid::AbstractGrid, tracers, ::AbstractSmagorinsky) =
     (νₑ=CellField(arch, grid),)
 """
-    κ_∂x_c(i, j, k, grid, c, tracer, closure, νₑ)
+    κ_∂x_c(i, j, k, grid, c, tracer_index, closure, νₑ)
 
 Return `κ ∂x c`, where `κ` is a function that computes
 diffusivity at cell centers (location `ccc`), and `c` is an array of scalar
 data located at cell centers.
 """
-@inline function κ_∂x_c(i, j, k, grid, c, tracer, closure::AbstractSmagorinsky, νₑ) 
-    Pr = getproperty(closure.Pr, tracer)
-    κ = getproperty(closure.κ, tracer)
+@inline function κ_∂x_c(i, j, k, grid, c, tracer_index, closure::AbstractSmagorinsky, νₑ) 
+    Pr = closure.Pr[tracer_index]
+    κ = closure.κ[tracer_index]
 
     νₑ = ▶x_faa(i, j, k, grid, νₑ, closure)
     κₑ = (νₑ - closure.ν) / Pr + κ
@@ -266,15 +266,15 @@ data located at cell centers.
 end
 
 """
-    κ_∂y_c(i, j, k, grid, c, tracer, closure, νₑ)
+    κ_∂y_c(i, j, k, grid, c, tracer_index, closure, νₑ)
 
 Return `κ ∂y c`, where `κ` is a function that computes
 diffusivity at cell centers (location `ccc`), and `c` is an array of scalar
 data located at cell centers.
 """
-@inline function κ_∂y_c(i, j, k, grid, c, tracer, closure::AbstractSmagorinsky, νₑ) 
-    Pr = getproperty(closure.Pr, tracer)
-    κ = getproperty(closure.κ, tracer)
+@inline function κ_∂y_c(i, j, k, grid, c, tracer_index, closure::AbstractSmagorinsky, νₑ) 
+    Pr = closure.Pr[tracer_index]
+    κ = closure.κ[tracer_index]
 
     νₑ = ▶y_afa(i, j, k, grid, νₑ, closure)
     κₑ = (νₑ - closure.ν) / Pr + κ
@@ -283,15 +283,15 @@ data located at cell centers.
 end
 
 """
-    κ_∂z_c(i, j, k, grid, c, tracer, closure, νₑ)
+    κ_∂z_c(i, j, k, grid, c, tracer_index, closure, νₑ)
 
 Return `κ ∂z c`, where `κ` is a function that computes
 diffusivity at cell centers (location `ccc`), and `c` is an array of scalar
 data located at cell centers.
 """
-@inline function κ_∂z_c(i, j, k, grid, c, tracer, closure::AbstractSmagorinsky, νₑ) 
-    Pr = getproperty(closure.Pr, tracer)
-    κ = getproperty(closure.κ, tracer)
+@inline function κ_∂z_c(i, j, k, grid, c, tracer_index, closure::AbstractSmagorinsky, νₑ) 
+    Pr = closure.Pr[tracer_index]
+    κ = closure.κ[tracer_index]
 
     νₑ = ▶z_aaf(i, j, k, grid, νₑ, closure)
     κₑ = (νₑ - closure.ν) / Pr + κ
@@ -305,10 +305,10 @@ end
 Return the diffusive flux divergence `∇ ⋅ (κ ∇ c)` for the turbulence
 `closure`, where `c` is an array of scalar data located at cell centers.
 """
-@inline ∇_κ_∇c(i, j, k, grid, c, tracer, closure::AbstractSmagorinsky, diffusivities) = (
-      ∂x_caa(i, j, k, grid, κ_∂x_c, c, tracer, closure, diffusivities.νₑ)
-    + ∂y_aca(i, j, k, grid, κ_∂y_c, c, tracer, closure, diffusivities.νₑ)
-    + ∂z_aac(i, j, k, grid, κ_∂z_c, c, tracer, closure, diffusivities.νₑ)
+@inline ∇_κ_∇c(i, j, k, grid, c, tracer_index, closure::AbstractSmagorinsky, diffusivities) = (
+      ∂x_caa(i, j, k, grid, κ_∂x_c, c, tracer_index, closure, diffusivities.νₑ)
+    + ∂y_aca(i, j, k, grid, κ_∂y_c, c, tracer_index, closure, diffusivities.νₑ)
+    + ∂z_aac(i, j, k, grid, κ_∂z_c, c, tracer_index, closure, diffusivities.νₑ)
 )
 
 function calc_diffusivities!(diffusivities, grid, closure::AbstractSmagorinsky, buoyancy, U, C)
